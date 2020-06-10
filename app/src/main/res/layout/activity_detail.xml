@@ -1,6 +1,58 @@
 <?xml version="1.0" encoding="utf-8"?>
-<android.support.constraint.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
-                                             android:layout_width="match_parent"
-                                             android:layout_height="match_parent">
+<ScrollView
+        xmlns:android="http://schemas.android.com/apk/res/android"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+>
+    <LinearLayout
+            android:layout_width="match_parent"
+            android:orientation="vertical"
+            android:padding="@dimen/dp_10"
+            android:layout_height="wrap_content">
 
-</android.support.constraint.ConstraintLayout>
+        <ImageView
+                android:id="@+id/iv_album"
+                android:layout_width="@dimen/image_large_size"
+                android:layout_height="@dimen/image_large_size"
+                android:layout_margin="@dimen/dp_10"
+                android:layout_gravity="center_horizontal"
+                android:contentDescription="@string/todo"/>
+
+        <android.support.design.widget.TextInputLayout
+                android:id="@+id/tv_name"
+                android:hint="@string/name"
+                android:layout_margin="@dimen/dp_10"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content">
+
+            <android.support.design.widget.TextInputEditText
+                    android:id="@+id/et_name"
+                    style="@style/input_style"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"/>
+        </android.support.design.widget.TextInputLayout>
+
+        <android.support.design.widget.TextInputLayout
+                android:id="@+id/tv_artist"
+                android:hint="@string/artist"
+                android:layout_margin="@dimen/dp_10"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content">
+
+            <android.support.design.widget.TextInputEditText
+                    android:id="@+id/et_artist"
+                    style="@style/input_style"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"/>
+        </android.support.design.widget.TextInputLayout>
+
+        <TextView
+                android:id="@+id/tv_link"
+                android:layout_margin="@dimen/dp_10"
+                android:layout_width="wrap_content"
+                android:textStyle="bold|italic"
+                android:textColorLink="@color/linkColor"
+                android:layout_height="wrap_content"/>
+
+    </LinearLayout>
+</ScrollView>
