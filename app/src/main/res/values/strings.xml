@@ -1,0 +1,17 @@
+<resources>
+    <string name="app_name">AlbumApp</string>
+    <string name="search">Search</string>
+    <string name="search_text">Search text</string>
+    <string name="select_type">Select type:</string>
+    <string name="todo">TODO</string>
+    <string name="name">Name</string>
+    <string name="artist">Artist</string>
+    <string name="source_link">Source link</string>
+    <string name="detail_page_title">Detail Page</string>
+
+    <string-array name="item_types">
+        <item>Album</item>
+        <item>Artist</item>
+        <item>Song</item>
+    </string-array>
+</resources>

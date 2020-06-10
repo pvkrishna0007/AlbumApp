@@ -1,0 +1,160 @@
+/*
+ * Copyright (C) 2017 The Android Open Source Project
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package android.arch.persistence.room;
+
+import android.arch.core.executor.ArchTaskExecutor;
+import android.arch.core.internal.SafeIterableMap;
+import android.arch.persistence.db.SupportSQLiteDatabase;
+import android.arch.persistence.db.SupportSQLiteStatement;
+import android.database.Cursor;
+import android.database.sqlite.SQLiteException;
+import android.support.annotation.NonNull;
+import android.support.annotation.Nullable;
+import android.support.annotation.RestrictTo;
+import android.support.annotation.VisibleForTesting;
+import android.support.annotation.WorkerThread;
+import android.support.v4.util.ArrayMap;
+import android.support.v4.util.ArraySet;
+import android.util.Log;
+
+import java.lang.ref.WeakReference;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.locks.Lock;
+
+/**
+ * InvalidationTracker keeps a list of tables modified by queries and notifies its callbacks about
+ * these tables.
+ */
+// We create an in memory table with (version, table_id) where version is an auto-increment primary
+// key and a table_id (hardcoded int from initialization).
+// ObservedTableTracker tracks list of tables we should be watching (e.g. adding triggers for).
+// Before each beginTransaction, RoomDatabase invokes InvalidationTracker to sync trigger states.
+// After each endTransaction, RoomDatabase invokes InvalidationTracker to refresh invalidated
+// tables.
+// Each update on one of the observed tables triggers an insertion into this table, hence a
+// new version.
+// Unfortunately, we cannot override the previous row because sqlite uses the conflict resolution
+// of the outer query (the thing that triggered us) so we do a cleanup as we sync instead of letting
+// SQLite override the rows.
+// https://sqlite.org/lang_createtrigger.html:  An ON CONFLICT clause may be specified as part of an
+// UPDATE or INSERT action within the body of the trigger. However if an ON CONFLICT clause is
+// specified as part of the statement causing the trigger to fire, then conflict handling policy of
+// the outer statement is used instead.
+public class InvalidationTracker {
+
+    private static final String[] TRIGGERS = new String[]{"UPDATE", "DELETE", "INSERT"};
+
+    private static final String UPDATE_TABLE_NAME = "room_table_modification_log";
+
+    private static final String VERSION_COLUMN_NAME = "version";
+
+    private static final String TABLE_ID_COLUMN_NAME = "table_id";
+
+    private static final String CREATE_VERSION_TABLE_SQL = "CREATE TEMP TABLE " + UPDATE_TABLE_NAME
+            + "(" + VERSION_COLUMN_NAME
+            + " INTEGER PRIMARY KEY AUTOINCREMENT, "
+            + TABLE_ID_COLUMN_NAME
+            + " INTEGER)";
+
+    @VisibleForTesting
+    static final String CLEANUP_SQL = "DELETE FROM " + UPDATE_TABLE_NAME
+            + " WHERE " + VERSION_COLUMN_NAME + " NOT IN( SELECT MAX("
+            + VERSION_COLUMN_NAME + ") FROM " + UPDATE_TABLE_NAME
+            + " GROUP BY " + TABLE_ID_COLUMN_NAME + ")";
+
+    @VisibleForTesting
+    // We always clean before selecting so it is unlikely to have the same row twice and if we
+    // do, it is not a big deal, just more data in the cursor.
+    static final String SELECT_UPDATED_TABLES_SQL = "SELECT * FROM " + UPDATE_TABLE_NAME
+            + " WHERE " + VERSION_COLUMN_NAME
+            + "  > ? ORDER BY " + VERSION_COLUMN_NAME + " ASC;";
+
+    @NonNull
+    @VisibleForTesting
+    ArrayMap<String, Integer> mTableIdLookup;
+    private String[] mTableNames;
+
+    @NonNull
+    @VisibleForTesting
+    long[] mTableVersions;
+
+    private Object[] mQueryArgs = new Object[1];
+
+    // max id in the last syc
+    private long mMaxVersion = 0;
+
+    private final RoomDatabase mDatabase;
+
+    AtomicBoolean mPendingRefresh = new AtomicBoolean(false);
+
+    private volatile boolean mInitialized = false;
+
+    private volatile SupportSQLiteStatement mCleanupStatement;
+
+    private ObservedTableTracker mObservedTableTracker;
+
+    // should be accessed with synchronization only.
+    @VisibleForTesting
+    final SafeIterableMap<Observer, ObserverWrapper> mObserverMap = new SafeIterableMap<>();
+
+    /**
+     * Used by the generated code.
+     *
+     * @hide
+     */
+    @SuppressWarnings("WeakerAccess")
+    @RestrictTo(RestrictTo.Scope.LIBRARY_GROUP)
+    public InvalidationTracker(RoomDatabase database, String... tableNames) {
+        mDatabase = database;
+        mObservedTableTracker = new ObservedTableTracker(tableNames.length);
+        mTableIdLookup = new ArrayMap<>();
+        final int size = tableNames.length;
+        mTableNames = new String[size];
+        for (int id = 0; id < size; id++) {
+            final String tableName = tableNames[id].toLowerCase(Locale.US);
+            mTableIdLookup.put(tableName, id);
+            mTableNames[id] = tableName;
+        }
+        mTableVersions = new long[tableNames.length];
+        Arrays.fill(mTableVersions, 0);
+    }
+
+    /**
+     * Internal method to initialize table tracking.
+     * <p>
+     * You should never call this method, it is called by the generated code.
+     */
+    void internalInit(SupportSQLiteDatabase database) {
+        synchronized (this) {
+            if (mInitialized) {
+                Log.e(Room.LOG_TAG, "Invalidation tracker is initialized twice :/.");
+                return;
+            }
+
+            database.beginTransaction();
+            try {
+                database.execSQL("PRAGMA temp_store = MEMORY;");
+                database.execSQL("PRAGMA recursive_triggers='ON';");
+                database.execSQL(CREATE_VERSION_TABLE_SQL);
+                database.setTransactionSuccessful();
+            } finally {
+                database.endTransaction();
