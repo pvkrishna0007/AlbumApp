@@ -1,28 +1,24 @@
 package com.album.mobileapp
 
-import android.app.Application
 import android.arch.core.executor.testing.InstantTaskExecutorRule
 import android.arch.lifecycle.Observer
-import android.os.AsyncTask.execute
 import com.album.mobileapp.model.Album
 import com.album.mobileapp.model.AlbumMatches
 import com.album.mobileapp.model.AlbumModel
 import com.album.mobileapp.model.Results
-import com.album.mobileapp.network.ApiInterface
 import com.album.mobileapp.network.IRepository
+import com.album.mobileapp.utils.Resource
+import com.album.mobileapp.utils.Status
 import com.album.mobileapp.viewmodel.AlbumViewModel
 import okhttp3.ResponseBody
 import org.junit.After
-import org.junit.Test
-
-import org.junit.Assert.*
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Before
 import org.junit.Rule
-import org.junit.runner.RunWith
-import org.junit.runners.JUnit4
+import org.junit.Test
 import org.mockito.Mock
-import org.mockito.Mockito.*
-
+import org.mockito.Mockito.`when`
 import org.mockito.MockitoAnnotations
 import retrofit2.Call
 import retrofit2.Response
@@ -42,10 +38,7 @@ class AlbumViewModelUnitTest {
     // Mock variables
     @Mock private lateinit var callMock: Call<AlbumModel>
     @Mock private lateinit var repoMock: IRepository
-    @Mock private lateinit var observerMock: Observer<String>
-    @Mock private lateinit var observerLoadingMock: Observer<Boolean>
-    @Mock private lateinit var observerAlbumMock: Observer<AlbumModel>
-    @Mock private lateinit var observerNetworkMock: Observer<Boolean>
+    @Mock private lateinit var observerResourceMock: Observer<Resource<AlbumModel>>
     @Mock private lateinit var responseBody: ResponseBody
 
     @Before
@@ -61,11 +54,11 @@ class AlbumViewModelUnitTest {
     @Test
     fun validateFetchDataSuccessWithData(){
         //Assign
-        val response = Response.success(AlbumModel())
+        val response = Response.success(getAlbumModel())
         val viewModel: AlbumViewModel = AlbumViewModel(repoMock).apply {
             setNetworkState(true)
         }
-        viewModel.getMessageLiveData().observeForever(observerMock)
+        viewModel.getResultLiveData().observeForever(observerResourceMock)
 
         `when`(callMock.execute()).thenReturn(response)
         `when`(repoMock.getDetailsBy("Orange", "Album", 1))
@@ -83,36 +76,8 @@ class AlbumViewModelUnitTest {
         assertNotNull(actualResponseBody)
 
         viewModel.handleSuccessResponse(data)
-        verify(observerMock).onChanged("Success")
-    }
-
-    @Test
-    fun validateFetchDataSuccessWithoutData(){
-        //Assign
-        val albumModel: AlbumModel? = null
-        val response = Response.success(albumModel)
-        val viewModel: AlbumViewModel = AlbumViewModel(repoMock).apply {
-            setNetworkState(true)
-        }
-        viewModel.getMessageLiveData().observeForever(observerMock)
-
-        `when`(callMock.execute()).thenReturn(response)
-        `when`(repoMock.getDetailsBy("Yellow", "Album", 1))
-            .thenReturn(callMock)
-
-        //Act
-        viewModel.setSearchText("Yellow")
-        viewModel.setSearchType("Album")
-        val data = viewModel.fetchAlbumCall?.execute()
-        val actualErrorBody = data?.errorBody()
-        val actualResponseBody = data?.body()
-
-        //Assert
-        assertEquals(null, actualErrorBody)
-        assertNull(actualResponseBody)
-
-        viewModel.handleSuccessResponse(data!!)
-        verify(observerMock).onChanged("NoData")
+        assertEquals(viewModel.getResultLiveData().value?.status, Status.SUCCESS)
+        assertEquals(viewModel.getResultLiveData().value?.data?.getAlbums()?.size, 1)
     }
 
     @Test
@@ -122,8 +87,7 @@ class AlbumViewModelUnitTest {
         val viewModel: AlbumViewModel = AlbumViewModel(repoMock).apply {
             setNetworkState(true)
         }
-        viewModel.getMessageLiveData().observeForever(observerMock)
-        viewModel.getLoadingLiveData().observeForever(observerLoadingMock)
+        viewModel.getResultLiveData().observeForever(observerResourceMock)
 
         `when`(callMock.execute()).thenReturn(response)
         `when`(repoMock.getDetailsBy("Tester", "Artist", 1))
@@ -141,20 +105,19 @@ class AlbumViewModelUnitTest {
         assertEquals(null, actualResponseBody)
 
         viewModel.handleErrorResponse(Exception("Error"))
-        verify(observerLoadingMock).onChanged(false)
+        assertEquals(viewModel.getResultLiveData().value?.status, Status.ERROR)
     }
 
     private fun getAlbumModel(): AlbumModel {
-        val albumModel = AlbumModel()
+        return AlbumModel()
             .apply {
                 results = Results()
-                    .apply{
+                    .apply {
                         albumMatches = AlbumMatches()
                             .apply { album = ArrayList<Album>()
-                                .apply{ add(Album())} }
+                                .apply { add(Album()) } }
                     }
             }
-        return albumModel
     }
 
     @Test
@@ -165,8 +128,7 @@ class AlbumViewModelUnitTest {
         val viewModel: AlbumViewModel = AlbumViewModel(repoMock).apply {
             setNetworkState(true)
         }
-        viewModel.getMessageLiveData().observeForever(observerMock)
-        viewModel.getSearchResultsLiveData().observeForever(observerAlbumMock)
+        viewModel.getResultLiveData().observeForever(observerResourceMock)
 
         `when`(callMock.execute()).thenReturn(response)
         `when`(repoMock.getDetailsBy("Orange", "Album", 1))
@@ -176,7 +138,10 @@ class AlbumViewModelUnitTest {
 
         viewModel.setSearchType("Album")
         viewModel.setSearchText("Orange")
-        viewModel.fetchAlbumCall?.execute()!!
+        val data = viewModel.fetchAlbumCall?.execute()!!
+        viewModel.handleSuccessResponse(data)
+        assertEquals(viewModel.getResultLiveData().value?.status, Status.SUCCESS)
+        assertEquals(viewModel.getResultLiveData().value?.data?.getAlbums()?.size, 1)
 
         //Act
         viewModel.loadMore()
@@ -188,7 +153,8 @@ class AlbumViewModelUnitTest {
         assertNotNull(actualLoadMoreResponseBody)
 
         viewModel.handleSuccessResponse(dataLoadMore)
-        verify(observerMock).onChanged("Success")
+        assertEquals(viewModel.getResultLiveData().value?.status, Status.SUCCESS)
+        assertEquals(viewModel.getResultLiveData().value?.data?.getAlbums()?.size, 2)
     }
 
     @Test
@@ -198,13 +164,12 @@ class AlbumViewModelUnitTest {
         val viewModel: AlbumViewModel = AlbumViewModel(repoMock).apply {
             setNetworkState(false)
         }
-        viewModel.getMessageLiveData().observeForever(observerMock)
-        viewModel.isNetworkAvailable().observeForever(observerNetworkMock)
-
+        viewModel.getResultLiveData().observeForever(observerResourceMock)
         //Act
         viewModel.setSearchType("Album")
 
         //Assert
-        verify(observerMock).onChanged("Please check network connection")
+        assertEquals(viewModel.getResultLiveData().value?.status, Status.ERROR)
+        assertEquals(viewModel.getResultLiveData().value?.message, "Please check network connection")
     }
 }

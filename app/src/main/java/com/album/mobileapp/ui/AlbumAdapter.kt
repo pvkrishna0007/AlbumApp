@@ -25,6 +25,11 @@ class AlbumAdapter(context: Context) : RecyclerView.Adapter<AlbumAdapter.Holder>
         notifyDataSetChanged()
     }
 
+    fun addAlbumList(albums: List<Album>) {
+        albumList.addAll(albums)
+        notifyDataSetChanged()
+    }
+
     override fun onCreateViewHolder(viewGroup: ViewGroup, i: Int): Holder {
 
         val view = inflater.inflate(R.layout.row_album_item, viewGroup, false)

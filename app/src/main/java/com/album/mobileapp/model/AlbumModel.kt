@@ -18,8 +18,9 @@ class AlbumModel {
         return results?.albumMatches?.album?:ArrayList()
     }
 
-    fun addAlbums(albumModel: AlbumModel): AlbumModel {
-        getAlbums().addAll(0, albumModel.getAlbums())
+    fun appendAlbums(albumModel: AlbumModel?): AlbumModel {
+        if(albumModel != null)
+            getAlbums().addAll(albumModel.getAlbums())
         return this
     }
 }

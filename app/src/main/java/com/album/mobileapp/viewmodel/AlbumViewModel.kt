@@ -7,6 +7,7 @@ import android.arch.lifecycle.ViewModelProvider
 import android.support.annotation.VisibleForTesting
 import com.album.mobileapp.model.AlbumModel
 import com.album.mobileapp.network.IRepository
+import com.album.mobileapp.utils.Resource
 import retrofit2.Call
 import retrofit2.Callback
 import retrofit2.Response
@@ -14,20 +15,16 @@ import retrofit2.Response
 class AlbumViewModel(val repo: IRepository) : ViewModel() {
 
     private var pageNumber = 1
-
     private var searchType: String = ""
     private var searchText: String = ""
-    private var searchResultsLiveData = MutableLiveData<AlbumModel>()
-    private var loadingLiveData = MutableLiveData<Boolean>()
-    private var messageLiveData = MutableLiveData<String>()
-    private var isNetworkAvailable = MutableLiveData<Boolean>()
+    private var isNetworkAvailable :Boolean = false
+    private var oldAlbumModel: AlbumModel = AlbumModel()
+
+    private var resultLiveData = MutableLiveData<Resource<AlbumModel>>()
     @VisibleForTesting
     var fetchAlbumCall : Call<AlbumModel>? = null
 
-    fun getSearchResultsLiveData(): LiveData<AlbumModel> = searchResultsLiveData
-    fun getLoadingLiveData(): LiveData<Boolean> = loadingLiveData
-    fun getMessageLiveData(): LiveData<String> = messageLiveData
-    fun isNetworkAvailable(): LiveData<Boolean> = isNetworkAvailable
+    fun getResultLiveData(): LiveData<Resource<AlbumModel>> = resultLiveData
 
     override fun onCleared() {
         super.onCleared()
@@ -50,14 +47,14 @@ class AlbumViewModel(val repo: IRepository) : ViewModel() {
     }
 
     fun setNetworkState(isConnected: Boolean){
-        isNetworkAvailable.value = isConnected
+        isNetworkAvailable = isConnected
     }
 
     private fun getResults() {
-        if (isNetworkAvailable.value == true) {
+        if (isNetworkAvailable) {
             if (searchText.isEmpty()) return
 
-            loadingLiveData.value = true
+            resultLiveData.postValue(Resource.loading(null))
 
             fetchAlbumCall?.cancel()
             fetchAlbumCall = repo.getDetailsBy(searchText, searchType, pageNumber)
@@ -75,33 +72,28 @@ class AlbumViewModel(val repo: IRepository) : ViewModel() {
                 }
             })
         }else{
-            messageLiveData.postValue("Please check network connection")
+            resultLiveData.postValue(Resource.error(null, "Please check network connection"))
         }
     }
 
     fun handleErrorResponse(t: Throwable) {
-        loadingLiveData.postValue(false)
-        messageLiveData.postValue(t.message)
+        resultLiveData.postValue(Resource.error(null, t.message?:"Error in response"))
     }
 
     fun handleSuccessResponse(response: Response<AlbumModel>) {
         val searchList = response.body()
         if(searchList != null) {
-            if (pageNumber == 1) {
-                searchResultsLiveData.postValue(searchList)
-            } else {
-                val oldAlbumData = searchResultsLiveData.value?:AlbumModel()
-                searchResultsLiveData.postValue(searchList.addAlbums(oldAlbumData))
+            if (isLoadMore()) {
+                oldAlbumModel.appendAlbums(searchList)
+            }else{
+                oldAlbumModel = searchList
             }
-            messageLiveData.postValue("Success")
-        }else{
-            messageLiveData.postValue("NoData")
+            resultLiveData.postValue(Resource.success(oldAlbumModel))
+            pageNumber++
         }
-        loadingLiveData.postValue(false)
     }
 
     fun loadMore() {
-        pageNumber++
         getResults()
     }
 
@@ -109,6 +101,9 @@ class AlbumViewModel(val repo: IRepository) : ViewModel() {
         pageNumber = 1
     }
 
+    private fun isLoadMore(): Boolean {
+        return pageNumber > 1
+    }
 }
 
 class AlbumViewModelFactory(var repo: IRepository) : ViewModelProvider.Factory {
